@@ -2,12 +2,19 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Turbo Racer 8-bit</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#14101f;--ink:#fff7e0;--gold:#ffd23f;--gold-d:#b8860b;--pad:rgba(255,247,224,.14);color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 [hidden]{display:none!important}
+*{-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
+body{position:fixed;inset:0;width:100%}
+.btn,.card{touch-action:manipulation}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;font-family:'Press Start 2P',ui-monospace,monospace}
 body{display:flex;align-items:center;justify-content:center}
 #stage{position:relative;width:min(100vw,160dvh);aspect-ratio:8/5;container-type:inline-size;background:#000}
@@ -98,7 +105,7 @@ input{font:inherit;font-size:max(8px,2cqw);padding:1cqw 1.6cqw;background:#241c3
 <div id="rot"><div style="font-size:40px">🔄</div>GIRA TU CELULAR<br>Este juego se juega en horizontal</div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
-const W=320,H=200,LINE=150;
+const W=480,H=300;
 const cv=document.getElementById('c'),ctx=cv.getContext('2d');
 cv.width=W;cv.height=H;ctx.imageSmoothingEnabled=false;
 const $=id=>document.getElementById(id);
@@ -106,50 +113,86 @@ const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 /* ---------- Mapas ---------- */
 const MAPS=[
- {name:'CLÁSICO',O:{x0:14,y0:10,x1:306,y1:190,r:70},W:50,g:[[28,104,48],[34,118,56]],t:[[86,86,98],[96,96,110]],k:[[222,52,52],[240,240,240]],turn:.05,drag:.985,off:.45},
- {name:'DESIERTO',O:{x0:10,y0:30,x1:310,y1:170,r:70},W:46,g:[[222,184,106],[212,172,94]],t:[[140,96,64],[154,108,74]],k:[[230,120,30],[245,235,210]],turn:.05,drag:.985,off:.55},
- {name:'HIELO',O:{x0:20,y0:12,x1:300,y1:188,r:60},W:42,g:[[236,244,250],[224,234,246]],t:[[150,200,232],[168,214,240]],k:[[40,110,200],[250,250,255]],turn:.042,drag:.996,off:.6}
+ {name:'CLÁSICO',hw:30,ctrl:[[240,45],[380,45],[440,100],[425,170],[360,200],[330,250],[250,262],[190,225],[120,250],[55,215],[45,140],[70,85],[130,50]],
+  g:[[28,104,48],[34,118,56]],t:[[86,86,98],[96,96,110]],k:[[222,52,52],[240,240,240]],turn:.05,drag:.985,off:.45},
+ {name:'DESIERTO',hw:28,ctrl:[[210,42],[340,42],[425,70],[448,120],[405,152],[335,150],[292,178],[322,222],[290,262],[195,268],[115,268],[52,240],[38,175],[82,128],[58,82],[115,48]],
+  g:[[222,184,106],[212,172,94]],t:[[140,96,64],[154,108,74]],k:[[230,120,30],[245,235,210]],turn:.05,drag:.985,off:.55},
+ {name:'HIELO',hw:25,ctrl:[[240,40],[360,40],[430,75],[440,115],[380,165],[432,205],[405,258],[330,272],[270,238],[210,270],[130,262],[70,225],[95,175],[45,135],[65,80],[130,45]],
+  g:[[236,244,250],[224,234,246]],t:[[150,200,232],[168,214,240]],k:[[40,110,200],[250,250,255]],turn:.042,drag:.996,off:.6}
 ];
-let O,I,Wd,cur,PATHS,REF,N,S0,lanes;
-function setGeo(m){O=m.O;Wd=m.W;I={x0:O.x0+Wd,y0:O.y0+Wd,x1:O.x1-Wd,y1:O.y1-Wd,r:O.r-Wd};}
-function rr(x,y,R){const cx=cl(x,R.x0+R.r,R.x1-R.r),cy=cl(y,R.y0+R.r,R.y1-R.r);return Math.hypot(x-cx,y-cy);}
-function margins(x,y){return [O.r-rr(x,y,O),rr(x,y,I)-I.r];}
-function onTrack(x,y){const m=margins(x,y);return m[0]>=0&&m[1]>=0;}
+let cur,PATHS,REF,N,S0=0,lanes=[0,1,2],CP,GR,ND=0,NI=-1;
+
+/* curva cerrada suave (Catmull-Rom) con puntos cada ~4px; el punto 0 es la línea de meta */
+function spline(c){
+  const n=c.length,raw=[];
+  for(let i=0;i<n;i++){
+    const a=c[(i+n-1)%n],b=c[i],d=c[(i+1)%n],e=c[(i+2)%n];
+    for(let t=0;t<1;t+=.02){
+      const t2=t*t,t3=t2*t,f=k=>.5*(2*b[k]+(-a[k]+d[k])*t+(2*a[k]-5*b[k]+4*d[k]-e[k])*t2+(-a[k]+3*b[k]-3*d[k]+e[k])*t3);
+      raw.push([f(0),f(1)]);
+    }
+  }
+  const out=[raw[0]];let acc=0;
+  for(let i=1;i<raw.length;i++){acc+=Math.hypot(raw[i][0]-raw[i-1][0],raw[i][1]-raw[i-1][1]);if(acc>=4){out.push(raw[i]);acc=0;}}
+  return out;
+}
+function buildGrid(pts){
+  const gw=(W>>5)+1,gh=(H>>5)+1,g=Array.from({length:gw*gh},()=>[]);
+  pts.forEach((p,i)=>g[cl(p[1]>>5,0,gh-1)*gw+cl(p[0]>>5,0,gw-1)].push(i));
+  return{g,gw,gh};
+}
+/* distancia al centro de la pista (ND) e índice del punto más cercano (NI) */
+function nd(x,y){
+  const cx=cl(x>>5,0,GR.gw-1),cy=cl(y>>5,0,GR.gh-1);let b=1e9,bi=-1;
+  for(let j=cy-1;j<=cy+1;j++)for(let i=cx-1;i<=cx+1;i++){
+    if(i<0||j<0||i>=GR.gw||j>=GR.gh)continue;
+    for(const k of GR.g[j*GR.gw+i]){const p=CP[k],d=(p[0]-x)**2+(p[1]-y)**2;if(d<b){b=d;bi=k;}}
+  }
+  ND=Math.sqrt(b);NI=bi;
+}
+function onTrack(x,y){nd(x,y);return NI>=0&&ND<=cur.hw-4;}
+
 function render(m){
-  const c=document.createElement('canvas');c.width=W;c.height=H;const t=c.getContext('2d'),img=t.createImageData(W,H);
-  const K=[24,24,24],Wh=[240,240,240];
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const t=c.getContext('2d'),img=t.createImageData(W,H),K=[24,24,24],Wh=[240,240,240];
   for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-    const mg=margins(x+.5,y+.5),e=Math.min(mg[0],mg[1]);let q;
-    if(e<0)q=m.g[((x>>1)+(y>>1))&1];
-    else if(e<4)q=m.k[((x>>2)+(y>>2))&1];
-    else if(x>=148&&x<154&&y<O.y0+Wd)q=((((x-148)>>1)+(y>>1))&1)?Wh:K;
+    nd(x+.5,y+.5);const d=NI<0?999:ND;let q;
+    if(d>m.hw)q=m.g[((x>>1)+(y>>1))&1];
+    else if(d>m.hw-4)q=m.k[((x>>2)+(y>>2))&1];
+    else if(NI<=1)q=(((x>>1)+(y>>1))&1)?Wh:K;
     else q=((x*7+y*13)%11===0)?m.t[1]:m.t[0];
     const i=(y*W+x)*4;img.data[i]=q[0];img.data[i+1]=q[1];img.data[i+2]=q[2];img.data[i+3]=255;
   }
   t.putImageData(img,0,0);return c;
 }
-MAPS.forEach(m=>{setGeo(m);m.cv=render(m);m.url=m.cv.toDataURL();});
+MAPS.forEach(m=>{m.pts=spline(m.ctrl);m.grid=buildGrid(m.pts);CP=m.pts;GR=m.grid;m.cv=render(m);m.url=m.cv.toDataURL();});
 $('maplist').innerHTML=MAPS.map((m,i)=>`<button class="card" data-map="${i}"><img src="${m.url}" alt="">${m.name}</button>`).join('');
 
-function makePath(i){
-  const x0=O.x0+i,y0=O.y0+i,x1=O.x1-i,y1=O.y1-i,r=O.r-i,p=[],S=4;
-  const line=(ax,ay,bx,by)=>{const n=Math.max(1,Math.round(Math.hypot(bx-ax,by-ay)/S));for(let k=0;k<n;k++)p.push([ax+(bx-ax)*k/n,ay+(by-ay)*k/n]);};
-  const arc=(cx,cy,a0)=>{const n=Math.max(2,Math.round(r*Math.PI/2/S));for(let k=0;k<n;k++){const a=a0+Math.PI/2*k/n;p.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}};
-  line(x0+r,y0,x1-r,y0);arc(x1-r,y0+r,-Math.PI/2);line(x1,y0+r,x1,y1-r);arc(x1-r,y1-r,0);
-  line(x1-r,y1,x0+r,y1);arc(x0+r,y1-r,Math.PI/2);line(x0,y1-r,x0,y0+r);arc(x0+r,y0+r,Math.PI);
-  return p;
-}
 function nearest(path,from,x,y,back=6,fwd=14){
   const n=path.length;let best=from,bd=1e9;
   for(let k=-back;k<=fwd;k++){const i=((from+k)%n+n)%n,d=(path[i][0]-x)**2+(path[i][1]-y)**2;if(d<bd){bd=d;best=i;}}
   return best;
 }
 function setMap(i){
-  cur=MAPS[i];setGeo(cur);
-  lanes=[.24,.5,.76].map(f=>Math.round(Wd*f));
-  PATHS={};lanes.forEach(l=>PATHS[l]=makePath(l));
-  REF=PATHS[lanes[1]];N=REF.length;S0=0;let bd=1e9;
-  REF.forEach((p,k)=>{if(Math.abs(p[1]-(O.y0+lanes[1]))<.5){const d=Math.abs(p[0]-LINE);if(d<bd){bd=d;S0=k;}}});
+  cur=MAPS[i];CP=cur.pts;GR=cur.grid;REF=cur.pts;N=REF.length;
+  PATHS={};
+  [0,1,2].forEach(l=>{
+    const off=(l-1)*cur.hw*.45;
+    PATHS[l]=REF.map((p,k)=>{const q=REF[(k+1)%N],a=Math.atan2(q[1]-p[1],q[0]-p[0]);return[p[0]-Math.sin(a)*off,p[1]+Math.cos(a)*off];});
+  });
+}
+/* posición de salida: filas detrás de la meta, 3 carriles */
+function spawn(k){
+  const s=SL[k],row=(130-s[0])/18,lane=s[1],i=(N-4-row*5)%N,p=REF[i],q=REF[(i+1)%N];
+  const a=Math.atan2(q[1]-p[1],q[0]-p[0]),off=(lane-1)*cur.hw*.45;
+  return{x:p[0]-Math.sin(a)*off,y:p[1]+Math.cos(a)*off,a,lane};
+}
+/* paredes: el carro no puede salirse de la pista */
+function wall(c){
+  nd(c.x,c.y);let i=NI,d=ND;
+  if(i<0){i=nearest(REF,0,c.x,c.y,0,N-1);d=Math.hypot(c.x-REF[i][0],c.y-REF[i][1]);}
+  const lim=cur.hw-7;
+  if(d>lim){const p=REF[i],k=lim/d;c.x=p[0]+(c.x-p[0])*k;c.y=p[1]+(c.y-p[1])*k;c.speed*=.9;}
 }
 
 /* ---------- Sprites ---------- */
@@ -176,8 +219,8 @@ function mkCars(){
   const list=hum.map(h=>({name:h[0],p:h[1],sp:h[1],arrow:h[2],max:1.55}));
   [1.47,1.41,1.35].forEach((m,k)=>list.push({name:'BOT '+(k+1),sp:2+k,max:m*DIFFS[dIdx][1]}));
   cars=list.map((d,k)=>{
-    const s=SL[ORD[k]],lane=lanes[s[1]];
-    const c=Object.assign({angle:0,speed:0,c:0,fin:null,place:0,inset:lane,x:s[0],y:O.y0+lane},d);
+    const s=spawn(ORD[k]),lane=s.lane;
+    const c=Object.assign({angle:s.a,speed:0,c:0,fin:null,place:0,inset:lane,x:s.x,y:s.y},d);
     c.px=c.x;c.rIdx=nearest(REF,0,c.x,c.y,0,N-1);c.aIdx=nearest(PATHS[lane],0,c.x,c.y,0,PATHS[lane].length-1);
     return c;
   });
@@ -188,7 +231,7 @@ function stepCar(c,inp){
   if(c.speed>lim)c.speed=Math.max(lim,c.speed-.03);
   if(c.speed<-.5)c.speed=-.5;
   c.angle+=(inp.right-inp.left)*cur.turn*cl(c.speed/.9,-1,1);
-  c.px=c.x;c.x=cl(c.x+Math.cos(c.angle)*c.speed,6,W-6);c.y=cl(c.y+Math.sin(c.angle)*c.speed,6,H-6);
+  c.px=c.x;c.x=cl(c.x+Math.cos(c.angle)*c.speed,6,W-6);c.y=cl(c.y+Math.sin(c.angle)*c.speed,6,H-6);wall(c);
 }
 function aiInput(c){
   const path=PATHS[c.inset];c.aIdx=nearest(path,c.aIdx,c.x,c.y);
@@ -231,12 +274,12 @@ function update(){
   cars.forEach(c=>{
     const manual=c.p!==undefined&&state==='race'&&c.fin===null;
     if(c.remote){c.x+=(c.tx-c.x)*.3;c.y+=(c.ty-c.y)*.3;const d=c.ta-c.angle;c.angle+=Math.atan2(Math.sin(d),Math.cos(d))*.3;c.rIdx=nearest(REF,c.rIdx,c.x,c.y);return;}
-    stepCar(c,manual?keys[c.p]:aiInput(c));
+    const pi=c.rIdx;stepCar(c,manual?keys[c.p]:aiInput(c));
     c.rIdx=nearest(REF,c.rIdx,c.x,c.y);
-    if(c.y<O.y0+Wd+2){if(c.px<LINE&&c.x>=LINE)c.c++;else if(c.px>=LINE&&c.x<LINE)c.c--;}
+    if(pi>N*.7&&c.rIdx<N*.3)c.c++;else if(pi<N*.3&&c.rIdx>N*.7)c.c--;
     if(state==='race'&&c.c>laps&&c.fin===null){c.fin=raceT;c.place=++nFin;}
   });
-  if(net&&state==='race'&&raceT%4===0){const m=cars[0];net.ch.send({type:'broadcast',event:'pos',payload:{id:net.id,x:m.x,y:m.y,a:m.angle,c:m.c,f:m.fin}});}
+  if(net&&(state==='race'||state==='done')&&(++netT%4===0)){const m=cars[0];net.ch.send({type:'broadcast',event:'pos',payload:{id:net.id,x:m.x,y:m.y,a:m.angle,c:m.c,f:m.fin}});}
   for(let i=0;i<cars.length;i++)for(let j=i+1;j<cars.length;j++){
     const a=cars[i],b=cars[j],dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy);
     if(d<10&&d>0&&!a.remote&&!b.remote){const o=(10-d)/2,nx=dx/d,ny=dy/d;a.x-=nx*o;a.y-=ny*o;b.x+=nx*o;b.y+=ny*o;a.speed*=.97;b.speed*=.97;}
@@ -322,11 +365,17 @@ document.querySelectorAll('#pad button').forEach(b=>{
   ['pointerup','pointercancel','lostpointercapture'].forEach(n=>b.addEventListener(n,()=>{keys[p][k]=0;b.classList.remove('on');}));
 });
 addEventListener('contextmenu',e=>e.preventDefault());
+/* iPhone: sin zoom y sin teclado accidental */
+['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t,e=>e.preventDefault()));
+document.addEventListener('touchstart',e=>{if(e.touches.length>1)e.preventDefault();},{passive:false});
+document.addEventListener('touchmove',e=>{if(!e.target.closest('.tbl'))e.preventDefault();},{passive:false});
+$('pad').addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+if(matchMedia('(pointer:coarse)').matches)document.querySelectorAll('input').forEach(i=>{i.readOnly=true;i.addEventListener('click',()=>{const v=prompt(i.placeholder,i.value);if(v!==null)i.value=v.slice(0,i.maxLength);});});
 
 /* ---------- Online (Supabase Realtime) ---------- */
 const SB_URL='https://vhouvejtcdaobrzsyrdi.supabase.co',SB_KEY='sb_publishable_nJS37eIYg-gGWj5-9-GFpw_RgrmBRLj';
 let sb=null;try{sb=window.supabase.createClient(SB_URL,SB_KEY);}catch(_){}
-let net=null,pub=true,cLaps=5,cMap=0,selRoom=null,joinTimer=null,rooms=[];
+let netT=0,net=null,pub=true,cLaps=5,cMap=0,selRoom=null,joinTimer=null,rooms=[];
 const myId=Math.random().toString(36).slice(2,10);
 const nick=()=>($('nick').value.trim().toUpperCase()||'JUG'+Math.floor(100+Math.random()*900)).slice(0,12);
 const hash=async(id,p)=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(id+':'+p)))].map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -399,9 +448,9 @@ $('lleave').onclick=showMenu;
 function startOnline(P){
   mode='on';laps=P.laps;mapIdx=P.map;setMap(P.map);
   cars=P.order.map((o,i)=>{
-    const s=SL[ORD[i]],lane=lanes[s[1]],mine=o.id===net.id;
-    const c={angle:0,speed:0,c:0,fin:null,inset:lane,x:s[0],y:O.y0+lane,name:o.name,sp:o.sp,max:1.55,id:o.id};
-    if(mine){c.p=0;c.arrow='#2dff4a';c.tag='P1';}else{c.remote=true;c.tx=c.x;c.ty=c.y;c.ta=0;}
+    const s=spawn(ORD[i]),lane=s.lane,mine=o.id===net.id;
+    const c={angle:s.a,speed:0,c:0,fin:null,inset:lane,x:s.x,y:s.y,name:o.name,sp:o.sp,max:1.55,id:o.id};
+    if(mine){c.p=0;c.arrow='#2dff4a';c.tag='P1';}else{c.remote=true;c.tx=c.x;c.ty=c.y;c.ta=s.a;}
     c.px=c.x;c.rIdx=nearest(REF,0,c.x,c.y,0,N-1);c.aIdx=nearest(PATHS[lane],0,c.x,c.y,0,PATHS[lane].length-1);return c;
   });
   cars.sort((a,b)=>(a.remote?1:0)-(b.remote?1:0));
